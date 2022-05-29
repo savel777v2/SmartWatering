@@ -49,9 +49,6 @@ void setup() {
   analogWrite(MOTOR_PIN, 0);
 }
 
-sensors_event_t eventTemperature;
-sensors_event_t eventHumidity;
-
 void loop() {
   loopTime();
   loopWatering();
