@@ -24,12 +24,12 @@ DHT_Unified Dht(DHT22_PIN, DHT22);
 
 int modeWatering; // режим орошения 0 - отключен
 // Настройка режима орошения индекс соответвует modeWatering-1, первое значение - выбор уровня сигнала, второе значение - продолжительность в минутах
-int settModeWatering[3][2] = {{2, 5}, {2, 5}, {4, 60}};
+int settModeWatering[3][2] = {{2, 5}, {2, 10}, {4, 60}};
 int counterMunuteMode[3];
 // настройка констант времени алгоритмов
-#define LOOP_MINUTE_FOR_0 2 * 60
+#define LOOP_MINUTE_FOR_0 48 * 60
 #define DURATION_MINUTE_FOR_1 24 * 60
-#define DURATION_MINUTE_FOR_2 24 * 60
+#define DURATION_MINUTE_FOR_2 3 * 60
 
 struct {
   int sensorLevel = 0;
@@ -65,7 +65,8 @@ void loopWatering() {
   if (modeWatering == 0 && _lastLoopTime > 0) {
     // обработка отключения режима например убираем сигнал с ножки
     // отработает единожды после отключения полива
-    analogWrite(MOTOR_PIN, 0);
+    if (DEBUGGING) Serial.println("Watering OFF");
+    analogWrite(MOTOR_PIN, 0);    
     _lastLoopTime = 0;
     _counterMunute = 0;
   }
@@ -74,6 +75,7 @@ void loopWatering() {
     if (_lastLoopTime == 0) {
       // обработка включения режима например ставим сигнал на ножку
       // отработает единожды при включении полива
+      if (DEBUGGING) Serial.println("Watering ON");
       switch (settModeWatering[modeWatering - 1][0]) {
         case 2:
           // уровень сигнала для 0,2 МПа
@@ -127,8 +129,8 @@ void loopTime() {
     }
 
     // анализ алгоритма 1 - сигнал от датчика влажности почвы более 100% в течении DURATION_MINUTE_FOR_1 минут
-    // СТРАННО >= 100 - это уже болото, может <=10 к примеру - пустыня? иначе зальем все...
-    if (sensorsData.soilMoisture >= 100) counterMunuteMode[1]++;
+    // СТРАННО >= 100 - это уже болото, заменил на <=10 -сухо, иначе зальем все...
+    if (sensorsData.soilMoisture <=10) counterMunuteMode[1]++;
     else  counterMunuteMode[1] = 0;
     if (counterMunuteMode[1] > DURATION_MINUTE_FOR_1 && modeWatering == 0) {
       // если по факту уже поливается, то он обождет окончание полива и включит свою программу если условия за время полива не изменились
