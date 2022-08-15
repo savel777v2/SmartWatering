@@ -8,7 +8,7 @@
 
 // ОТЛАДКА
 #define DEBUGGING true // для включения отладки
-#define MINUTE_DURATION 1000 // длительность минуты, в рабочем режиме используем 60000 (минута), для отладка "ускоряем" до 1000 (секунда)
+#define MINUTE_DURATION 60000 // длительность минуты, в рабочем режиме используем 60000 (минута), для отладка "ускоряем" до 100 (мс)
 
 // Датчик влажности почвы инверсный: больше влажность - меньше значение.
 #define SENSOR_PIN A0 // аналоговый вход датчика влажности
@@ -19,17 +19,20 @@
 #define DHT22_PIN 2 // цифровой вход датчика влажности
 DHT_Unified Dht(DHT22_PIN, DHT22);
 
-// аналоговый выход управления мотором, например для полива подаем ненулевой вольтаж
-#define MOTOR_PIN A1
-
-int modeWatering; // режим орошения 0 - отключен
-// Настройка режима орошения индекс соответвует modeWatering-1, первое значение - выбор уровня сигнала, второе значение - продолжительность в минутах
-int settModeWatering[3][2] = {{2, 5}, {2, 10}, {4, 60}};
+// аналоговые выходы управления насосами, например для полива подаем ненулевой вольтаж
+#define MOTOR_PIN_1 A1 // насос 1 капельного орошения
+#define MOTOR_PIN_2 A2 // насос 2 спринклерного орошения
+// Текущий режим орошения: индекс соответвует номеру насоса
+//  первое значение - режим орошения (0 - отключен, 1 - включен)
+//  второе значение - текущая продолжительность в минутах режима,
+//  третье значение - нужная продолжительность в минутах режима
+int modeWatering[2][3];
+// Счетчик минут в целях срабатывания режимов
 int counterMunuteMode[3];
 // настройка констант времени алгоритмов
-#define LOOP_MINUTE_FOR_0 48 * 60
-#define DURATION_MINUTE_FOR_1 24 * 60
-#define DURATION_MINUTE_FOR_2 3 * 60
+#define LOOP_MINUTE_FOR_0 1440 // 24 * 60 24 часа
+#define DURATION_MINUTE_FOR_1 60 // 1 час
+#define DURATION_MINUTE_FOR_2 40 // 40 минут
 
 struct {
   int sensorLevel = 0;
@@ -45,8 +48,10 @@ void setup() {
   sensor_t sensor;
   Dht.temperature().getSensor(&sensor);
   Dht.humidity().getSensor(&sensor);
-  pinMode(MOTOR_PIN, OUTPUT);
-  analogWrite(MOTOR_PIN, 0);
+  pinMode(MOTOR_PIN_1, OUTPUT);
+  analogWrite(MOTOR_PIN_1, 0);
+  pinMode(MOTOR_PIN_2, OUTPUT);
+  analogWrite(MOTOR_PIN_2, 0);
 }
 
 void loop() {
@@ -56,40 +61,44 @@ void loop() {
 
 
 void loopWatering() {
-  static unsigned long _lastLoopTime = 0; // последнее время обработки этого алгоритма
-  static int _counterMunute = 0; // счетчик минут продожтельности полива
+  static unsigned long _lastLoopTime[2] = {0, 0}; // последнее время обработки каждого насоса
 
-  if (modeWatering == 0 && _lastLoopTime > 0) {
-    // обработка отключения режима например убираем сигнал с ножки
-    // отработает единожды после отключения полива
-    if (DEBUGGING) Serial.println("Watering OFF");
-    analogWrite(MOTOR_PIN, 0);    
-    _lastLoopTime = 0;
-    _counterMunute = 0;
-  }
+  for (int i = 0; i <= 1; i++) {
 
-  if (modeWatering != 0) {
-    if (_lastLoopTime == 0) {
-      // обработка включения режима например ставим сигнал на ножку
-      // отработает единожды при включении полива
-      if (DEBUGGING) Serial.println("Watering ON");
-      switch (settModeWatering[modeWatering - 1][0]) {
-        case 2:
-          // уровень сигнала для 0,2 МПа
-          analogWrite(MOTOR_PIN, 200);
-          break;
-        case 4:
-          // уровень сигнала для 0,4 МПа
-          analogWrite(MOTOR_PIN, 400);
-          break;
+    if (modeWatering[i][0] == 0 && _lastLoopTime[i] > 0) {
+      // обработка отключения режима например убираем сигнал с ножки
+      // отработает единожды после отключения полива
+      if (DEBUGGING) {
+        Serial.print("Watering ");
+        Serial.print(i);
+        Serial.println(" OFF");
       }
+      if (i == 0) analogWrite(MOTOR_PIN_1, 0);
+      else analogWrite(MOTOR_PIN_2, 0);      
+      _lastLoopTime[i] = 0;
+      modeWatering[i][1] = 0;
+      modeWatering[i][2] = 0;
     }
-    // По умолчанию цикл - минута
-    if ((millis() - _lastLoopTime) > MINUTE_DURATION) {
-      _lastLoopTime = millis();
-      _counterMunute++;
-      // условие завершения полива по времени
-      if (_counterMunute >= settModeWatering[modeWatering - 1][1]) modeWatering = 0;
+
+    if (modeWatering[i][0] != 0) {
+      if (_lastLoopTime[i] == 0) {
+        // обработка включения режима например ставим сигнал на ножку
+        // отработает единожды при включении полива
+        if (DEBUGGING) {
+          Serial.print("Watering ");
+          Serial.print(i);
+          Serial.println(" ON");
+        }
+        if (i == 0) analogWrite(MOTOR_PIN_1, 400); // уровень сигнала для насоса 1
+        else analogWrite(MOTOR_PIN_2, 400); // уровень сигнала для насоса 1
+      }
+      // По умолчанию цикл - минута
+      if ((millis() - _lastLoopTime[i]) > MINUTE_DURATION) {
+        _lastLoopTime[i] = millis();
+        modeWatering[i][1]++;
+        // условие завершения полива по времени
+        if (modeWatering[i][1] >= modeWatering[i][2]) modeWatering[i][0] = 0;
+      }
     }
   }
 }
@@ -100,9 +109,6 @@ void loopWatering() {
 void loopTime() {
   static unsigned long _lastLoopTime = 0; // последнее время обработки этого алгоритма
   sensors_event_t _eventDht;
-  static int _counterMunute0 = 0; // счетчик минут для алгоритма 0
-  static int _counterMunute1 = 0; // счетчик минут для алгоритма 1
-  static int _counterMunute2 = 0; // счетчик минут для алгоритма 2
 
   // По умолчанию цикл - минута
   if ((millis() - _lastLoopTime) > MINUTE_DURATION) {
@@ -119,29 +125,37 @@ void loopTime() {
 
     // анализ алгоритма 0 - простой полив в цикле каждые LOOP_MINUTE_FOR_0 минут
     counterMunuteMode[0]++;
-    if (counterMunuteMode[0] > LOOP_MINUTE_FOR_0 && modeWatering == 0) {
+    if (counterMunuteMode[0] > LOOP_MINUTE_FOR_0 && modeWatering[0][0] == 0) {
       // если по факту уже поливается, то он обождет окончание полива и включит свою программу.
       counterMunuteMode[0] = 0;
-      modeWatering = 1;
+      // включим первый насос на 3 часа
+      modeWatering[0][0] = 1;
+      modeWatering[0][1] = 0;
+      modeWatering[0][2] = 180;
     }
 
-    // анализ алгоритма 1 - сигнал от датчика влажности почвы более 100% в течении DURATION_MINUTE_FOR_1 минут
-    // СТРАННО >= 100 - это уже болото, заменил на <=10 -сухо, иначе зальем все...
-    if (sensorsData.soilMoisture <=10) counterMunuteMode[1]++;
+    // анализ алгоритма 1 - сигнал от датчика влажности почвы меньше 70% в течении DURATION_MINUTE_FOR_1 минут
+    if (sensorsData.soilMoisture <= 70) counterMunuteMode[1]++;
     else  counterMunuteMode[1] = 0;
-    if (counterMunuteMode[1] > DURATION_MINUTE_FOR_1 && modeWatering == 0) {
+    if (counterMunuteMode[1] > DURATION_MINUTE_FOR_1 && modeWatering[0][0] == 0) {
       // если по факту уже поливается, то он обождет окончание полива и включит свою программу если условия за время полива не изменились
       counterMunuteMode[1] = 0;
-      modeWatering = 2;
+      // включим первый насос на 3 часа
+      modeWatering[0][0] = 1;
+      modeWatering[0][1] = 0;
+      modeWatering[0][2] = 180;
     }
 
     // анализ алгоритма 2 - низкая влажность воздуха и превышение температуры воздуха в течении DURATION_MINUTE_FOR_2 минут
-    if (sensorsData.relative_humidity <= 40 && sensorsData.temperature >= 35) counterMunuteMode[2]++;
+    if (sensorsData.relative_humidity <= 40 && sensorsData.temperature >= 30) counterMunuteMode[2]++;
     else counterMunuteMode[2] = 0;
-    if (counterMunuteMode[2] > DURATION_MINUTE_FOR_2 && modeWatering == 0) {
+    if (counterMunuteMode[2] > DURATION_MINUTE_FOR_2 && modeWatering[1][0] == 0) {
       // если по факту уже поливается, то он обождет окончание полива и включит свою программу если условия за время полива не изменились
       counterMunuteMode[2] = 0;
-      modeWatering = 3;
+      // включим второй насос на 2 минуты
+      modeWatering[1][0] = 1;
+      modeWatering[1][1] = 0;
+      modeWatering[1][2] = 2;
     }
 
     // отладка всех переменных
@@ -165,7 +179,17 @@ void printLog() {
   Serial.print(counterMunuteMode[1]);
   Serial.print(" Munute 2: ");
   Serial.print(counterMunuteMode[2]);
-  Serial.print(" modeWatering: ");
-  Serial.print(modeWatering);
+  Serial.print(" modeWatering[0] вкл: ");
+  Serial.print(modeWatering[0][0]);
+  Serial.print(" мин: ");
+  Serial.print(modeWatering[0][1]);
+  Serial.print(" макс: ");
+  Serial.print(modeWatering[0][2]);
+  Serial.print(" modeWatering[1] вкл: ");
+  Serial.print(modeWatering[1][0]);
+  Serial.print(" мин: ");
+  Serial.print(modeWatering[1][1]);
+  Serial.print(" макс: ");
+  Serial.print(modeWatering[1][2]);
   Serial.println(" ");
 }
